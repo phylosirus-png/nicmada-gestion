@@ -107,6 +107,8 @@ th{background:#f7f9fe;color:var(--muted);font-size:12.5px;text-transform:upperca
       <button class="link" type="button" id="b-forgot">Mot de passe oublié ?</button>
     </div>
     <div id="reset-fields" class="hidden">
+      <div id="code-box"><label for="l-code">Code reçu par e-mail</label>
+      <input id="l-code" inputmode="numeric" autocomplete="one-time-code" maxlength="12" style="letter-spacing:6px;font-size:20px;font-weight:700;text-align:center"></div>
       <label for="l-new">Nouveau mot de passe (8 caractères minimum)</label>
       <input id="l-new" type="password" autocomplete="new-password" minlength="8">
       <button class="btn" style="width:100%;margin-top:18px" type="button" id="b-reset">Enregistrer le mot de passe</button>
@@ -200,10 +202,11 @@ function erreur(e){ console.error(e); const m = (e && (e.message||e.error_descri
 
 /* ---------------- Connexion ---------------- */
 sb.auth.onAuthStateChange((ev, session) => {
-  if (ev === "PASSWORD_RECOVERY") { recovering = true; showLogin(); $("login-fields").classList.add("hidden"); $("reset-fields").classList.remove("hidden"); return; }
+  if (ev === "PASSWORD_RECOVERY") { recovering = true; showLogin(); $("login-fields").classList.add("hidden"); $("reset-fields").classList.remove("hidden"); $("code-box").classList.add("hidden"); return; }
   if (recovering) return;
   setTimeout(() => onSession(session), 0);
 });
+if (new URLSearchParams(location.hash.slice(1)).get("error")) { history.replaceState(null, "", location.pathname); setTimeout(() => msg("m-login", "Ce lien a expiré ou a déjà été utilisé. Cliquez sur « Mot de passe oublié ? » pour recevoir un code.", "err"), 800); }
 function showLogin(){ $("v-app").classList.add("hidden"); $("v-login").classList.remove("hidden"); }
 async function onSession(session){
   if (!session) { current = null; showLogin(); return; }
@@ -229,10 +232,17 @@ $("b-forgot").onclick = async () => {
   const email = $("l-email").value.trim();
   if (!email) { msg("m-login", "Écrivez d'abord votre adresse e-mail.", "err"); return; }
   const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + "/" });
-  msg("m-login", error ? error.message : "Si ce compte existe, un e-mail de réinitialisation vient d'être envoyé.", error ? "err" : "ok");
+  if (error) { msg("m-login", error.message, "err"); return; }
+  recovering = true; $("login-fields").classList.add("hidden"); $("reset-fields").classList.remove("hidden"); $("code-box").classList.remove("hidden");
+  msg("m-login", "Si ce compte existe, un code vient d'être envoyé par e-mail. Saisissez-le avec votre nouveau mot de passe.", "ok"); $("l-code").focus();
 };
 $("b-reset").onclick = async () => {
   const p = $("l-new").value; if (p.length < 8) { msg("m-login", "8 caractères minimum.", "err"); return; }
+  if (!$("code-box").classList.contains("hidden")) {
+    const code = $("l-code").value.replace(/\D/g, "");
+    const r = await sb.auth.verifyOtp({ email: $("l-email").value.trim(), token: code, type: "recovery" });
+    if (r.error) { msg("m-login", "Code incorrect ou expiré. Utilisez le dernier e-mail reçu, ou redemandez un code.", "err"); return; }
+  }
   const { error } = await sb.auth.updateUser({ password: p });
   if (error) { msg("m-login", error.message, "err"); return; }
   recovering = false; $("reset-fields").classList.add("hidden"); $("login-fields").classList.remove("hidden");
