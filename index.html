@@ -82,6 +82,12 @@ dialog::backdrop{background:rgba(10,20,50,.55)}
 .photo{display:flex;align-items:center;gap:12px;margin-top:6px}
 .photo .prev{width:90px;height:90px;border-radius:12px;background:#eef3ff;display:grid;place-items:center;overflow:hidden;font-size:34px;flex:none}
 .photo .prev img{width:100%;height:100%;object-fit:cover}
+.photos3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:6px}
+.photos3 .ph{display:flex;flex-direction:column;gap:6px;min-width:0}
+.photos3 .prev{aspect-ratio:1;border-radius:12px;background:#eef3ff;display:grid;place-items:center;overflow:hidden;font-size:30px;color:#8a97b8}
+.photos3 .prev img{width:100%;height:100%;object-fit:cover}
+.photos3 small{font-weight:700;font-size:12.5px}
+.photos3 input[type=file]{font-size:12px;padding:6px;width:100%}
 .hint{font-size:12.5px;color:var(--muted);margin-top:4px}
 .chk{display:flex;align-items:center;gap:10px;margin-top:14px;font-weight:600}
 .chk .sw{margin:0}
@@ -301,6 +307,17 @@ function blocPhoto(id, url, icone){
     <div><input type="file" id="${id}" accept="image/*"><div class="hint">La photo est automatiquement réduite (site rapide en 3G/4G).</div>
     ${url ? `<label class="chk" style="font-weight:500"><input type="checkbox" id="${id}-del" style="width:auto"> Retirer la photo actuelle</label>` : ""}</div></div>`;
 }
+const ETATS = [["neuf","Neuf"],["comme_neuf","Comme neuf"],["reco","Reconditionné"],["bonne_occasion","Bonne occasion"],["seconde_main","2ᵉ main (occasion)"]];
+const etatNom = e => (ETATS.find(x => x[0] === e) || ETATS[0])[1];
+const photosDe = p => (p.images && p.images.length ? p.images : (p.image_url ? [p.image_url] : [])).slice(0, 3);
+function blocPhotos(urls, icone){
+  return `<div class="photos3">${[0, 1, 2].map(i => `<div class="ph">
+    <div class="prev" id="p-img${i}-prev">${urls[i] ? `<img src="${esc(urls[i])}" alt="">` : (i ? "＋" : esc(icone || "🖼️"))}</div>
+    <small>${i ? "Photo " + (i + 1) : "Photo 1 (principale)"}</small>
+    <input type="file" id="p-img${i}" accept="image/*" aria-label="Choisir la photo ${i + 1}">
+    ${urls[i] ? `<label class="chk" style="font-weight:500;margin:0"><input type="checkbox" id="p-img${i}-del" style="width:auto"> Retirer</label>` : ""}
+  </div>`).join("")}</div><div class="hint">Jusqu'à 3 photos. Elles sont réduites automatiquement (site rapide en 3G/4G). Sur le site, le visiteur les fait défiler.</div>`;
+}
 function previewPhoto(id){
   const f = $(id); if (!f) return;
   f.onchange = () => { const x = f.files[0]; if (x) $(id + "-prev").innerHTML = `<img src="${URL.createObjectURL(x)}" alt="">`; };
@@ -338,9 +355,9 @@ async function loadProd(){
   PROD = data;
   $("l-prod").innerHTML = data.length ? data.map(p => `
     <div class="row">
-      <div class="th">${p.image_url ? `<img src="${esc(p.image_url)}" alt="">` : esc(p.icone || "💻")}</div>
+      <div class="th">${photosDe(p)[0] ? `<img src="${esc(photosDe(p)[0])}" alt="">` : esc(p.icone || "💻")}</div>
       <div class="tx"><b>${esc(p.nom)}</b><small>${esc(p.details)}</small>
-        <small><span class="pill">${p.etat === "reco" ? "Reconditionné" : "Neuf"}</span> · ${esc(p.prix || "Prix sur demande")} · ordre ${p.ordre}</small></div>
+        <small><span class="pill">${esc(etatNom(p.etat))}</span> · ${esc(p.prix || "Prix sur demande")} · 📷 ${photosDe(p).length}/3 · ordre ${p.ordre}</small></div>
       <div class="act">
         <span class="pill ${p.publie ? "on" : "off"}">${p.publie ? "Publié" : "Masqué"}</span>
         <label class="sw" title="Publier / masquer"><input type="checkbox" data-pub="${p.id}" ${p.publie ? "checked" : ""}><span></span></label>
@@ -358,32 +375,42 @@ async function loadProd(){
     if (!confirm(`Supprimer définitivement « ${p.nom} » ? (Pour le cacher seulement, utilisez l'interrupteur.)`)) return;
     const { error } = await sb.from("site_produits").delete().eq("id", p.id);
     if (error) return erreur(error);
-    await supprimerPhoto(p.image_url); toast("Produit supprimé"); loadProd();
+    for (const u of photosDe(p)) await supprimerPhoto(u);
+    toast("Produit supprimé"); loadProd();
   });
 }
 function editProd(p){
-  p = p || { nom: "", details: "", etat: "reco", prix: "", icone: "💻", image_url: "", publie: true, ordre: 0 };
+  p = p || { nom: "", details: "", etat: "reco", prix: "", icone: "💻", image_url: "", images: [], publie: true, ordre: 0 };
+  const anciennes = photosDe(p);
   dialogue(p.id ? "Modifier le produit" : "Nouveau produit", `
     <label for="p-nom">Nom du produit *</label><input id="p-nom" required maxlength="120" value="${esc(p.nom)}" placeholder="HP EliteBook 840 G5">
     <label for="p-det">Caractéristiques</label><input id="p-det" maxlength="300" value="${esc(p.details)}" placeholder="Core i5 · 8 Go RAM · SSD 256 Go · 14 pouces">
     <div class="g2">
-      <div><label for="p-etat">État</label><select id="p-etat"><option value="reco" ${p.etat === "reco" ? "selected" : ""}>Reconditionné</option><option value="neuf" ${p.etat === "neuf" ? "selected" : ""}>Neuf</option></select></div>
+      <div><label for="p-etat">État</label><select id="p-etat">${ETATS.map(([k, n]) => `<option value="${k}" ${p.etat === k ? "selected" : ""}>${n}</option>`).join("")}</select></div>
       <div><label for="p-prix">Prix (vide = « Prix sur demande »)</label><input id="p-prix" maxlength="40" value="${esc(p.prix)}" placeholder="1 350 000 Ar"></div>
       <div><label for="p-ico">Icône si pas de photo</label><select id="p-ico">${["💻","🖥️","🖱️","💾","🖨️","📶","🔌","⌨️","🎧"].map(x => `<option ${x === p.icone ? "selected" : ""}>${x}</option>`).join("")}</select></div>
       <div><label for="p-ord">Ordre d'affichage</label><input id="p-ord" type="number" value="${p.ordre || 0}"></div>
     </div>
-    <label>Photo</label>${blocPhoto("p-img", p.image_url, p.icone)}
+    <label>Photos</label>${blocPhotos(anciennes, p.icone)}
     <div class="chk">${sw("p-pub", p.publie)} Publier sur le site</div>`,
   async () => {
-    let image_url = p.image_url || "";
-    const f = $("p-img").files[0];
-    if (f) { const u = await envoyerPhoto(f, "produits", 1000); if (image_url) await supprimerPhoto(image_url); image_url = u; }
-    else if ($("p-img-del") && $("p-img-del").checked) { await supprimerPhoto(image_url); image_url = ""; }
-    const row = { nom: v("p-nom"), details: v("p-det"), etat: $("p-etat").value, prix: v("p-prix"), icone: $("p-ico").value, ordre: +$("p-ord").value || 0, publie: $("p-pub").checked, image_url, maj_le: new Date().toISOString() };
-    const { error } = p.id ? await sb.from("site_produits").update(row).eq("id", p.id) : await sb.from("site_produits").insert(row);
-    if (error) throw error; loadProd();
+    // Photos : on envoie d'abord les nouvelles, on n'efface les anciennes qu'une fois le produit bien enregistré
+    const images = [], aEffacer = [], envoyees = [];
+    try {
+      for (let i = 0; i < 3; i++) {
+        const f = $("p-img" + i).files[0], retirer = $("p-img" + i + "-del") && $("p-img" + i + "-del").checked, cur = anciennes[i] || "";
+        if (f) { const u = await envoyerPhoto(f, "produits", 1000); envoyees.push(u); images.push(u); if (cur) aEffacer.push(cur); }
+        else if (retirer) { if (cur) aEffacer.push(cur); }
+        else if (cur) images.push(cur);
+      }
+      const row = { nom: v("p-nom"), details: v("p-det"), etat: $("p-etat").value, prix: v("p-prix"), icone: $("p-ico").value, ordre: +$("p-ord").value || 0, publie: $("p-pub").checked, images, image_url: images[0] || "", maj_le: new Date().toISOString() };
+      const { error } = p.id ? await sb.from("site_produits").update(row).eq("id", p.id) : await sb.from("site_produits").insert(row);
+      if (error) throw error;
+    } catch (e) { for (const u of envoyees) await supprimerPhoto(u); throw e; }
+    for (const u of aEffacer) await supprimerPhoto(u);
+    loadProd();
   });
-  previewPhoto("p-img");
+  [0, 1, 2].forEach(i => previewPhoto("p-img" + i));
 }
 $("add-prod").onclick = () => editProd();
 
