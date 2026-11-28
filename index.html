@@ -141,6 +141,7 @@ th{background:#f7f9fe;color:var(--muted);font-size:12.5px;text-transform:upperca
       <button data-tab="ann">📣 Annonces</button>
       <button data-tab="form">🎓 Formations</button>
       <button data-tab="insc">📝 Inscriptions</button>
+      <button data-tab="cli">👥 Clients</button>
       <button data-tab="ia">🤖 Assistant & infos</button>
     </nav>
   </header>
@@ -174,6 +175,12 @@ th{background:#f7f9fe;color:var(--muted);font-size:12.5px;text-transform:upperca
       <div class="head"><div><h2>Inscriptions aux formations</h2><p>Confirmez ou annulez les demandes. Le client voit le statut dans son espace.</p></div>
         <select id="f-insc" style="width:auto;min-width:220px"><option value="">Toutes les formations</option></select></div>
       <div class="tblwrap" id="l-insc"></div>
+    </div>
+
+    <div id="t-cli" class="hidden">
+      <div class="head"><div><h2>Comptes clients</h2><p id="cli-resume">Les personnes inscrites sur nicmada.com (espace client).</p></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><input id="f-cli" type="search" placeholder="Rechercher : nom, e-mail, téléphone, ville" style="width:auto;min-width:260px"><button class="btn light" id="csv-cli">⬇ Exporter (Excel)</button></div></div>
+      <div class="tblwrap" id="l-cli"></div>
     </div>
 
     <div id="t-ia" class="hidden">
@@ -258,7 +265,7 @@ $("b-reset").onclick = async () => {
 $("b-logout").onclick = async () => { await sb.auth.signOut(); current = null; showLogin(); };
 
 /* ---------------- Onglets ---------------- */
-const LOADERS = { dash: loadDash, prod: loadProd, soft: loadSoft, ann: loadAnn, form: loadForm, insc: loadInsc, ia: loadIA };
+const LOADERS = { dash: loadDash, prod: loadProd, soft: loadSoft, ann: loadAnn, form: loadForm, insc: loadInsc, cli: loadCli, ia: loadIA };
 function openTab(t){
   if (!LOADERS[t]) t = "dash";
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
@@ -589,6 +596,40 @@ function renderInsc(){
   });
 }
 $("f-insc").onchange = renderInsc;
+
+/* ---------------- Clients ---------------- */
+let CLI = [];
+const dt = d => d ? new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+async function loadCli(){
+  $("l-cli").innerHTML = `<div class="empty">Chargement…</div>`;
+  const { data, error } = await sb.rpc("admin_clients");
+  if (error) return erreur(error);
+  CLI = data.filter(c => !c.admin);
+  const n30 = CLI.filter(c => new Date(c.cree_le) > Date.now() - 30 * 864e5).length, nc = CLI.filter(c => !c.confirme).length;
+  $("cli-resume").textContent = `${CLI.length} compte(s) client · ${n30} ces 30 derniers jours` + (nc ? ` · ${nc} e-mail(s) pas encore confirmé(s)` : "");
+  renderCli();
+}
+function renderCli(){
+  const q = $("f-cli").value.trim().toLowerCase();
+  const rows = CLI.filter(c => !q || [c.nom, c.email, c.telephone, c.ville].join(" ").toLowerCase().includes(q));
+  $("l-cli").innerHTML = rows.length ? `<table><thead><tr><th>Client</th><th>Contact</th><th>Inscrit le</th><th>Dernière connexion</th><th>Activité</th></tr></thead><tbody>` + rows.map(c => `
+    <tr><td><b>${esc(c.nom || "—")}</b>${c.ville ? `<br><small>📍 ${esc(c.ville)}</small>` : ""}${c.confirme ? "" : `<br><span class="pill warn">E-mail non confirmé</span>`}</td>
+      <td><a href="mailto:${esc(c.email)}">${esc(c.email)}</a>${c.telephone ? `<br>${wa(c.telephone) ? `<a href="${wa(c.telephone)}" target="_blank" rel="noopener">💬 ${esc(c.telephone)}</a>` : esc(c.telephone)}` : ""}</td>
+      <td><small>${dt(c.cree_le)}</small></td>
+      <td><small>${dt(c.derniere_connexion)}</small></td>
+      <td><small>⬇ ${c.telechargements} téléchargement(s)<br>🎓 ${c.inscriptions} inscription(s)</small></td></tr>`).join("") + `</tbody></table>`
+    : `<div class="empty">${CLI.length ? "Aucun client ne correspond à la recherche." : "Aucun compte client pour l'instant. Les visiteurs créent leur compte sur nicmada.com (bouton « Connexion / Inscription »)."}</div>`;
+}
+$("f-cli").oninput = renderCli;
+$("csv-cli").onclick = () => {
+  if (!CLI.length) return toast("Aucun client à exporter");
+  const cel = x => `"${String(x ?? "").replace(/"/g, '""')}"`;
+  const lignes = [["Nom", "E-mail", "Téléphone", "Ville", "Inscrit le", "Dernière connexion", "E-mail confirmé", "Téléchargements", "Inscriptions formations"]]
+    .concat(CLI.map(c => [c.nom, c.email, c.telephone, c.ville, dt(c.cree_le), dt(c.derniere_connexion), c.confirme ? "oui" : "non", c.telechargements, c.inscriptions]));
+  const blob = new Blob(["\ufeff" + lignes.map(l => l.map(cel).join(";")).join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `clients-nicmada-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+};
 
 /* ---------------- Assistant & infos ---------------- */
 async function loadIA(){
