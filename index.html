@@ -697,7 +697,7 @@ $("csv-cli").onclick = () => {
 /* ---------------- Vendeurs (boutiques des clients) ---------------- */
 let VEND = [];
 const VST = { brouillon: ["off", "📝 Brouillon"], en_attente: ["warn", "⏳ À vérifier"], validee: ["on", "✅ Validée"], refusee: ["bad", "❌ Refusée"], suspendue: ["bad", "⏸ Suspendue"] };
-const DOCNOM = { cin_recto: "CIN recto", cin_verso: "CIN verso", selfie: "Selfie avec la CIN", nif: "NIF", stat: "STAT", rcs: "RCS" };
+const DOCNOM = { cin_recto: "CIN recto", cin_verso: "CIN verso", selfie: "Selfie avec la CIN", residence: "Certificat de résidence", nif: "NIF", stat: "STAT", rcs: "RCS" };
 const VCAT = { ordinateurs: "Ordinateurs", composants: "Composants", accessoires: "Accessoires", imprimantes: "Imprimantes", reseau: "Réseau", telephonie: "Téléphonie", electricite: "Électricité", energie: "Énergie", medical: "Médical", autre: "Autre" };
 async function loadVend(){
   $("l-vend").innerHTML = `<div class="empty">Chargement…</div>`;
@@ -732,7 +732,7 @@ async function ouvrirVend(b){
     <dl class="kv">${kv("Responsable", b.responsable)}${kv("E-mail du compte", b.email)}${kv("Téléphone", b.telephone)}${kv("WhatsApp", b.whatsapp)}${kv("Ville", b.ville)}
       ${kv("Raison sociale", b.raison_sociale)}${kv("NIF", b.nif)}${kv("STAT", b.stat)}${kv("RCS", b.rcs)}${kv("Description", b.description)}${kv("Lien public", "nicmada.com/boutiques.html?b=" + b.slug)}</dl>
     <label>Pièces fournies <small style="font-weight:400;color:var(--muted)">(privées · liens valables 5 min)</small></label><div class="docs" id="v-docs"><div class="hint">Chargement…</div></div>
-    <div class="hint">Vérifiez : nom identique sur la CIN et dans « Responsable », visage du selfie = photo de la CIN, CIN lisible et non expirée${b.type === "entreprise" ? ", NIF/STAT/RCS au nom de la raison sociale" : ""}.</div>
+    <div class="hint">Vérifiez : nom identique sur la CIN et dans « Responsable », visage du selfie = photo de la CIN, CIN lisible et non expirée${b.type === "entreprise" ? " (CIN du représentant légal), NIF/STAT/RCS au nom de la raison sociale" : ", certificat de résidence au même nom et daté de moins de 3 mois"}.</div>
     <label>Produits <small style="font-weight:400;color:var(--muted)">(masquer retire un produit du site ; le vendeur ne peut pas le réafficher)</small></label><div id="v-prods"><div class="hint">Chargement…</div></div>
     ${decisions.length ? `<div class="g2"><div><label for="v-dec">Décision</label><select id="v-dec"><option value="">— Aucune —</option>${decisions.map(d => `<option value="${d}">${DNOM[d]}</option>`).join("")}</select></div></div>
     <label for="v-motif">Motif (envoyé au vendeur ; obligatoire pour refuser ou suspendre)</label><textarea id="v-motif" maxlength="500" style="min-height:80px" placeholder="Ex. : Photo de la CIN illisible, merci de la reprendre en pleine lumière.">${b.statut === "en_attente" ? "" : esc(b.motif || "")}</textarea>` : ""}`,
