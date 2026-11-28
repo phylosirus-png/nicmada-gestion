@@ -277,16 +277,18 @@ document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => openTab
 
 /* ---------------- Fenêtre d'édition générique ---------------- */
 let onSave = null;
-function dialogue(titre, html, save){
-  $("dlg-t").textContent = titre; $("dlg-b").innerHTML = html; onSave = save;
+let dlgLabel = "Enregistrer";
+function dialogue(titre, html, save, label){
+  dlgLabel = label || "Enregistrer";
+  $("dlg-t").textContent = titre; $("dlg-b").innerHTML = html; onSave = save; $("dlg-s").textContent = dlgLabel;
   $("dlg").showModal();
 }
 $("dlg-x").onclick = $("dlg-c").onclick = () => $("dlg").close();
 $("dlg-form").onsubmit = async e => {
   e.preventDefault(); const b = $("dlg-s"); b.disabled = true; b.textContent = "Enregistrement…";
-  try { await onSave(); $("dlg").close(); toast("✅ Enregistré"); }
+  try { const m = await onSave(); $("dlg").close(); toast(m || "✅ Enregistré"); }
   catch (err) { erreur(err); }
-  finally { b.disabled = false; b.textContent = "Enregistrer"; }
+  finally { b.disabled = false; b.textContent = dlgLabel; }
 };
 const v = id => ($(id).value || "").trim();
 const sw = (id, on) => `<label class="sw"><input type="checkbox" id="${id}" ${on ? "checked" : ""}><span></span></label>`;
@@ -612,13 +614,59 @@ async function loadCli(){
 function renderCli(){
   const q = $("f-cli").value.trim().toLowerCase();
   const rows = CLI.filter(c => !q || [c.nom, c.email, c.telephone, c.ville].join(" ").toLowerCase().includes(q));
-  $("l-cli").innerHTML = rows.length ? `<table><thead><tr><th>Client</th><th>Contact</th><th>Inscrit le</th><th>Dernière connexion</th><th>Activité</th></tr></thead><tbody>` + rows.map(c => `
-    <tr><td><b>${esc(c.nom || "—")}</b>${c.ville ? `<br><small>📍 ${esc(c.ville)}</small>` : ""}${c.confirme ? "" : `<br><span class="pill warn">E-mail non confirmé</span>`}</td>
+  $("l-cli").innerHTML = rows.length ? `<table><thead><tr><th>Client</th><th>Contact</th><th>Inscrit le</th><th>Dernière connexion</th><th>Activité</th><th></th></tr></thead><tbody>` + rows.map(c => `
+    <tr${c.suspendu_jusqua ? ' style="background:#fff7f6"' : ""}><td><b>${esc(c.nom || "—")}</b>${c.ville ? `<br><small>📍 ${esc(c.ville)}</small>` : ""}${c.confirme ? "" : `<br><span class="pill warn">E-mail non confirmé</span>`}${c.suspendu_jusqua ? `<br><span class="pill bad">⏸ Suspendu ${finSusp(c.suspendu_jusqua)}</span>` : ""}${+c.avertissements ? `<br><small>⚠ ${c.avertissements} avertissement(s)</small>` : ""}</td>
       <td><a href="mailto:${esc(c.email)}">${esc(c.email)}</a>${c.telephone ? `<br>${wa(c.telephone) ? `<a href="${wa(c.telephone)}" target="_blank" rel="noopener">💬 ${esc(c.telephone)}</a>` : esc(c.telephone)}` : ""}</td>
       <td><small>${dt(c.cree_le)}</small></td>
       <td><small>${dt(c.derniere_connexion)}</small></td>
-      <td><small>⬇ ${c.telechargements} téléchargement(s)<br>🎓 ${c.inscriptions} inscription(s)</small></td></tr>`).join("") + `</tbody></table>`
+      <td><small>⬇ ${c.telechargements} téléchargement(s)<br>🎓 ${c.inscriptions} inscription(s)</small></td>
+      <td style="white-space:nowrap"><button class="btn light sm" data-msg="${c.id}">✉️ Message</button>
+        ${c.suspendu_jusqua ? `<button class="btn sm" data-react="${c.id}">▶ Réactiver</button>` : `<button class="btn red sm" data-susp="${c.id}">⏸ Suspendre</button>`}</td></tr>`).join("") + `</tbody></table>`
     : `<div class="empty">${CLI.length ? "Aucun client ne correspond à la recherche." : "Aucun compte client pour l'instant. Les visiteurs créent leur compte sur nicmada.com (bouton « Connexion / Inscription »)."}</div>`;
+  const qui = id => CLI.find(c => c.id === id);
+  $("l-cli").querySelectorAll("[data-msg]").forEach(b => b.onclick = () => msgCli(qui(b.dataset.msg)));
+  $("l-cli").querySelectorAll("[data-susp]").forEach(b => b.onclick = () => suspCli(qui(b.dataset.susp)));
+  $("l-cli").querySelectorAll("[data-react]").forEach(b => b.onclick = async () => {
+    const c = qui(b.dataset.react);
+    if (!confirm(`Réactiver le compte de ${c.nom || c.email} ? Il pourra de nouveau se connecter.`)) return;
+    const { error } = await sb.rpc("admin_reactiver", { p_client: c.id });
+    if (error) erreur(error); else { toast("✅ Compte réactivé"); loadCli(); }
+  });
+}
+function finSusp(d){ const t = new Date(d); return t.getFullYear() > 9000 ? "sans limite" : "jusqu'au " + t.toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }); }
+const MODELES = {
+  "": "",
+  regles: "Bonjour, nous avons constaté une utilisation de votre compte contraire aux conditions d'utilisation de nicmada.com. Merci d'y remédier ; en cas de récidive, votre compte pourra être suspendu.",
+  partage: "Bonjour, les logiciels téléchargés depuis votre compte sont réservés à votre usage. Le partage ou la revente de fichiers ou de codes d'activation n'est pas autorisé. Merci de votre compréhension.",
+  infos: "Bonjour, certaines informations de votre profil semblent incorrectes (nom ou téléphone). Merci de les mettre à jour dans « Mon profil ».",
+  formation: "Bonjour, vous ne vous êtes pas présenté(e) à la formation pour laquelle vous étiez inscrit(e). Merci de nous prévenir à l'avance en cas d'empêchement."
+};
+function msgCli(c){
+  dialogue("Message à " + (c.nom || c.email), `
+    <p class="hint" style="margin-top:0">Le client verra ce message en haut de son espace client à sa prochaine connexion.</p>
+    <div class="g2"><div><label for="m-type">Type</label><select id="m-type"><option value="avertissement">⚠️ Avertissement</option><option value="info">ℹ️ Information</option></select></div>
+      <div><label for="m-mod">Modèle (facultatif)</label><select id="m-mod"><option value="">— Écrire moi-même —</option><option value="regles">Non-respect des règles</option><option value="partage">Partage de logiciels / codes</option><option value="infos">Profil incorrect</option><option value="formation">Absence à une formation</option></select></div></div>
+    <label for="m-txt">Message</label><textarea id="m-txt" maxlength="1000" required style="min-height:130px"></textarea>
+    <label class="chk" style="font-weight:500"><input type="checkbox" id="m-mail" style="width:auto"> Ouvrir aussi un e-mail vers ${esc(c.email)}</label>`,
+    async () => {
+      const texte = v("m-txt"); if (!texte) throw new Error("Écrivez le message.");
+      const { error } = await sb.rpc("admin_avertir", { p_client: c.id, p_type: $("m-type").value, p_texte: texte });
+      if (error) throw error;
+      if ($("m-mail").checked) location.href = `mailto:${c.email}?subject=${encodeURIComponent($("m-type").value === "info" ? "Information de N.I.C Mada" : "Avertissement concernant votre compte N.I.C Mada")}&body=${encodeURIComponent(texte + "\n\nN.I.C Mada · contact@nicmada.com · WhatsApp 032 02 367 02")}`;
+      loadCli(); return "✅ Message envoyé";
+    }, "Envoyer");
+  $("m-mod").onchange = () => { if ($("m-mod").value) $("m-txt").value = MODELES[$("m-mod").value]; };
+}
+function suspCli(c){
+  dialogue("Suspendre " + (c.nom || c.email), `
+    <p class="hint" style="margin-top:0">Le client est déconnecté et ne peut plus se connecter (ni télécharger, ni s'inscrire) pendant la durée choisie. Vous pouvez le réactiver à tout moment. Rien n'est supprimé.</p>
+    <label for="s-duree">Durée</label><select id="s-duree"><option value="3">3 jours</option><option value="7" selected>7 jours</option><option value="30">30 jours</option><option value="0">Sans limite (jusqu'à réactivation)</option></select>
+    <label for="s-motif">Motif (le client le verra quand son compte sera réactivé)</label><textarea id="s-motif" maxlength="1000" style="min-height:100px" placeholder="Ex. : Partage non autorisé de logiciels."></textarea>`,
+    async () => {
+      const { error } = await sb.rpc("admin_suspendre", { p_client: c.id, p_jours: +$("s-duree").value, p_motif: v("s-motif") });
+      if (error) throw error;
+      loadCli(); return "⏸ Compte suspendu";
+    }, "Suspendre le compte");
 }
 $("f-cli").oninput = renderCli;
 $("csv-cli").onclick = () => {
