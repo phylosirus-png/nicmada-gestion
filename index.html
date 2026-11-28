@@ -95,6 +95,12 @@ table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(-
 th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
 th{background:#f7f9fe;color:var(--muted);font-size:12.5px;text-transform:uppercase;letter-spacing:.5px}
 .tblwrap{overflow-x:auto}
+.docs{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin-top:8px}
+.docs a{display:flex;flex-direction:column;gap:4px;text-decoration:none;color:var(--ink);font-size:12.5px;font-weight:700}
+.docs .dp{aspect-ratio:4/3;border-radius:10px;background:#eef3ff;display:grid;place-items:center;overflow:hidden;font-size:30px;border:1px solid var(--line)}
+.docs .dp img{width:100%;height:100%;object-fit:contain;background:#222}
+.kv{display:grid;grid-template-columns:140px 1fr;gap:4px 12px;font-size:14px;margin-top:8px}.kv dt{color:var(--muted)}.kv dd{margin:0;word-break:break-word}
+#vend-n:not(:empty){background:var(--gold);color:var(--blue);border-radius:999px;padding:0 7px;font-size:12px;margin-left:4px}
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-weight:600;z-index:100;box-shadow:0 10px 30px rgba(0,0,0,.3)}
 </style>
 </head>
@@ -142,6 +148,7 @@ th{background:#f7f9fe;color:var(--muted);font-size:12.5px;text-transform:upperca
       <button data-tab="form">🎓 Formations</button>
       <button data-tab="insc">📝 Inscriptions</button>
       <button data-tab="cli">👥 Clients</button>
+      <button data-tab="vend">🏪 Vendeurs <span id="vend-n"></span></button>
       <button data-tab="ia">🤖 Assistant & infos</button>
     </nav>
   </header>
@@ -181,6 +188,12 @@ th{background:#f7f9fe;color:var(--muted);font-size:12.5px;text-transform:upperca
       <div class="head"><div><h2>Comptes clients</h2><p id="cli-resume">Les personnes inscrites sur nicmada.com (espace client).</p></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap"><input id="f-cli" type="search" placeholder="Rechercher : nom, e-mail, téléphone, ville" style="width:auto;min-width:260px"><button class="btn light" id="csv-cli">⬇ Exporter (Excel)</button></div></div>
       <div class="tblwrap" id="l-cli"></div>
+    </div>
+
+    <div id="t-vend" class="hidden">
+      <div class="head"><div><h2>Boutiques des vendeurs</h2><p id="vend-resume">Vérifiez les pièces avant de valider. Une boutique n'est visible sur nicmada.com/boutiques.html qu'une fois <b>validée</b>.</p></div>
+        <select id="f-vend" style="width:auto;min-width:220px"><option value="">Toutes</option><option value="en_attente">⏳ À vérifier</option><option value="validee">✅ Validées</option><option value="refusee">❌ Refusées</option><option value="suspendue">⏸ Suspendues</option><option value="brouillon">📝 Brouillons</option></select></div>
+      <div class="tblwrap" id="l-vend"></div>
     </div>
 
     <div id="t-ia" class="hidden">
@@ -265,7 +278,7 @@ $("b-reset").onclick = async () => {
 $("b-logout").onclick = async () => { await sb.auth.signOut(); current = null; showLogin(); };
 
 /* ---------------- Onglets ---------------- */
-const LOADERS = { dash: loadDash, prod: loadProd, soft: loadSoft, ann: loadAnn, form: loadForm, insc: loadInsc, cli: loadCli, ia: loadIA };
+const LOADERS = { dash: loadDash, prod: loadProd, soft: loadSoft, ann: loadAnn, form: loadForm, insc: loadInsc, cli: loadCli, vend: loadVend, ia: loadIA };
 function openTab(t){
   if (!LOADERS[t]) t = "dash";
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
@@ -335,6 +348,7 @@ function previewPhoto(id){
 /* ---------------- Tableau de bord ---------------- */
 async function loadDash(){
   $("stats").innerHTML = `<div class="stat"><span>Chargement…</span></div>`;
+  badgeVend().catch(() => {});
   const [{ data: s, error }, p, l, a, f] = await Promise.all([
     sb.rpc("admin_stats"),
     sb.from("site_produits").select("id,publie"),
@@ -678,6 +692,86 @@ $("csv-cli").onclick = () => {
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `clients-nicmada-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 };
+
+
+/* ---------------- Vendeurs (boutiques des clients) ---------------- */
+let VEND = [];
+const VST = { brouillon: ["off", "📝 Brouillon"], en_attente: ["warn", "⏳ À vérifier"], validee: ["on", "✅ Validée"], refusee: ["bad", "❌ Refusée"], suspendue: ["bad", "⏸ Suspendue"] };
+const DOCNOM = { cin_recto: "CIN recto", cin_verso: "CIN verso", selfie: "Selfie avec la CIN", nif: "NIF", stat: "STAT", rcs: "RCS" };
+const VCAT = { ordinateurs: "Ordinateurs", composants: "Composants", accessoires: "Accessoires", imprimantes: "Imprimantes", reseau: "Réseau", telephonie: "Téléphonie", electricite: "Électricité", energie: "Énergie", medical: "Médical", autre: "Autre" };
+async function loadVend(){
+  $("l-vend").innerHTML = `<div class="empty">Chargement…</div>`;
+  const { data, error } = await sb.rpc("admin_boutiques");
+  if (error) { $("l-vend").innerHTML = `<div class="empty">Module boutiques pas encore installé ou erreur : ${esc(error.message)}</div>`; return; }
+  VEND = data; majBadgeVend();
+  const n = st => VEND.filter(b => b.statut === st).length;
+  $("vend-resume").innerHTML = `${VEND.length} boutique(s) · <b>${n("en_attente")} à vérifier</b> · ${n("validee")} validée(s)${n("suspendue") ? ` · ${n("suspendue")} suspendue(s)` : ""}. Une boutique n'est visible sur le site qu'une fois validée.`;
+  renderVend();
+}
+function majBadgeVend(){ const k = VEND.filter(b => b.statut === "en_attente").length; $("vend-n").textContent = k ? k : ""; }
+async function badgeVend(){ const { data } = await sb.rpc("admin_boutiques"); if (data) { VEND = data; majBadgeVend(); } }
+function renderVend(){
+  const f = $("f-vend").value, rows = VEND.filter(b => !f || b.statut === f);
+  $("l-vend").innerHTML = rows.length ? `<table><thead><tr><th>Boutique</th><th>Vendeur</th><th>Statut</th><th>Envoyée le</th><th>Contenu</th><th></th></tr></thead><tbody>` + rows.map(b => `
+    <tr${b.statut === "en_attente" ? ' style="background:#fffbea"' : ""}><td><b>${esc(b.nom)}</b><br><small>${b.type === "entreprise" ? "🏢 Entreprise" : "👤 Particulier"}${b.ville ? " · 📍 " + esc(b.ville) : ""}</small></td>
+      <td>${esc(b.responsable || "—")}<br><small><a href="mailto:${esc(b.email)}">${esc(b.email)}</a></small>${(b.whatsapp || b.telephone) ? `<br>${wa(b.whatsapp || b.telephone) ? `<a href="${wa(b.whatsapp || b.telephone)}" target="_blank" rel="noopener">💬 ${esc(b.whatsapp || b.telephone)}</a>` : esc(b.whatsapp || b.telephone)}` : ""}</td>
+      <td><span class="pill ${VST[b.statut][0]}">${VST[b.statut][1]}</span>${b.motif ? `<br><small>${esc(b.motif)}</small>` : ""}</td>
+      <td><small>${dt(b.soumis_le)}</small></td>
+      <td><small>📎 ${b.nb_documents} pièce(s)<br>📦 ${b.nb_produits} produit(s)</small></td>
+      <td style="white-space:nowrap"><button class="btn sm${b.statut === "en_attente" ? " gold" : " light"}" data-vend="${b.id}">${b.statut === "en_attente" ? "🔍 Vérifier" : "Ouvrir"}</button>
+        ${b.statut === "validee" ? `<a class="btn light sm" href="https://nicmada.com/boutiques.html?b=${encodeURIComponent(b.slug)}" target="_blank" rel="noopener">Voir ↗</a>` : ""}</td></tr>`).join("") + `</tbody></table>`
+    : `<div class="empty">${VEND.length ? "Aucune boutique dans cette catégorie." : "Aucune boutique pour l'instant. Les clients ouvrent leur boutique depuis leur espace (onglet « Ma boutique »)."}</div>`;
+  $("l-vend").querySelectorAll("[data-vend]").forEach(x => x.onclick = () => ouvrirVend(VEND.find(b => String(b.id) === x.dataset.vend)));
+}
+async function ouvrirVend(b){
+  const kv = (k, val) => val ? `<dt>${k}</dt><dd>${esc(val)}</dd>` : "";
+  const decisions = { en_attente: ["validee", "refusee"], brouillon: ["refusee"], refusee: ["validee"], validee: ["suspendue"], suspendue: ["validee"] }[b.statut] || [];
+  const DNOM = { validee: "✅ Valider la boutique", refusee: "❌ Refuser (le vendeur pourra corriger)", suspendue: "⏸ Suspendre (retirée du site)" };
+  dialogue(b.nom, `
+    <p style="margin:10px 0 0"><span class="pill ${VST[b.statut][0]}">${VST[b.statut][1]}</span> ${b.type === "entreprise" ? "🏢 Entreprise" : "👤 Particulier"}</p>
+    <dl class="kv">${kv("Responsable", b.responsable)}${kv("E-mail du compte", b.email)}${kv("Téléphone", b.telephone)}${kv("WhatsApp", b.whatsapp)}${kv("Ville", b.ville)}
+      ${kv("Raison sociale", b.raison_sociale)}${kv("NIF", b.nif)}${kv("STAT", b.stat)}${kv("RCS", b.rcs)}${kv("Description", b.description)}${kv("Lien public", "nicmada.com/boutiques.html?b=" + b.slug)}</dl>
+    <label>Pièces fournies <small style="font-weight:400;color:var(--muted)">(privées · liens valables 5 min)</small></label><div class="docs" id="v-docs"><div class="hint">Chargement…</div></div>
+    <div class="hint">Vérifiez : nom identique sur la CIN et dans « Responsable », visage du selfie = photo de la CIN, CIN lisible et non expirée${b.type === "entreprise" ? ", NIF/STAT/RCS au nom de la raison sociale" : ""}.</div>
+    <label>Produits <small style="font-weight:400;color:var(--muted)">(masquer retire un produit du site ; le vendeur ne peut pas le réafficher)</small></label><div id="v-prods"><div class="hint">Chargement…</div></div>
+    ${decisions.length ? `<div class="g2"><div><label for="v-dec">Décision</label><select id="v-dec"><option value="">— Aucune —</option>${decisions.map(d => `<option value="${d}">${DNOM[d]}</option>`).join("")}</select></div></div>
+    <label for="v-motif">Motif (envoyé au vendeur ; obligatoire pour refuser ou suspendre)</label><textarea id="v-motif" maxlength="500" style="min-height:80px" placeholder="Ex. : Photo de la CIN illisible, merci de la reprendre en pleine lumière.">${b.statut === "en_attente" ? "" : esc(b.motif || "")}</textarea>` : ""}`,
+    async () => {
+      const d = $("v-dec") ? $("v-dec").value : "";
+      if (!d) return "Aucun changement";
+      const motif = v("v-motif");
+      if (d !== "validee" && !motif) throw new Error("Indiquez le motif pour le vendeur.");
+      if (d === "validee" && !confirm(`Valider « ${b.nom} » ? Elle sera visible publiquement sur nicmada.com.`)) throw new Error("Validation annulée");
+      const { error } = await sb.rpc("admin_statut_boutique", { p_id: b.id, p_statut: d, p_motif: d === "validee" ? "" : motif });
+      if (error) throw error;
+      loadVend(); return { validee: "✅ Boutique validée — le vendeur est prévenu", refusee: "Boutique refusée — le vendeur est prévenu", suspendue: "⏸ Boutique suspendue" }[d];
+    }, decisions.length ? "Enregistrer la décision" : "Fermer");
+  const [{ data: docs, error: e1 }, { data: prods, error: e2 }] = await Promise.all([
+    sb.from("boutique_documents").select("type,chemin").eq("boutique_id", b.id),
+    sb.from("boutique_produits").select("id,nom,prix,etat,categorie,images,publie,masque_admin").eq("boutique_id", b.id).order("ordre")
+  ]);
+  if (!$("v-docs")) return;
+  if (e1) $("v-docs").innerHTML = `<div class="hint">⚠️ ${esc(e1.message)}</div>`;
+  else if (!docs.length) $("v-docs").innerHTML = `<div class="hint">Aucune pièce envoyée.</div>`;
+  else {
+    const liens = await Promise.all(docs.map(d => sb.storage.from("kyc").createSignedUrl(d.chemin, 300)));
+    const ordre = Object.keys(DOCNOM); docs.forEach((d, i) => d.url = liens[i].data && liens[i].data.signedUrl);
+    docs.sort((a, c) => ordre.indexOf(a.type) - ordre.indexOf(c.type));
+    $("v-docs").innerHTML = docs.map(d => { const pdf = /\.pdf$/i.test(d.chemin); return d.url
+      ? `<a href="${esc(d.url)}" target="_blank" rel="noopener"><span class="dp">${pdf ? "📄" : `<img src="${esc(d.url)}" alt="${esc(DOCNOM[d.type])}">`}</span>${esc(DOCNOM[d.type] || d.type)} ↗</a>`
+      : `<div><span class="dp">⚠️</span>${esc(DOCNOM[d.type] || d.type)} (fichier introuvable)</div>`; }).join("");
+  }
+  if (e2) { $("v-prods").innerHTML = `<div class="hint">⚠️ ${esc(e2.message)}</div>`; return; }
+  $("v-prods").innerHTML = prods.length ? `<div class="list">` + prods.map(p => `<div class="row"><div class="th">${p.images && p.images[0] ? `<img src="${esc(p.images[0])}" alt="">` : "📦"}</div>
+      <div class="tx"><b>${esc(p.nom)}</b><small>${esc(VCAT[p.categorie] || p.categorie)} · ${esc(p.prix || "Prix sur demande")} · ${p.publie ? "publié par le vendeur" : "brouillon du vendeur"}</small></div>
+      <div class="act"><small>${p.masque_admin ? "🚫 Masqué" : "Visible"}</small>${sw("vm-" + p.id, p.masque_admin)}</div></div>`).join("") + `</div>`
+    : `<div class="hint">Aucun produit.</div>`;
+  prods.forEach(p => { const c = $("vm-" + p.id); c.onchange = async () => {
+    const { error } = await sb.from("boutique_produits").update({ masque_admin: c.checked }).eq("id", p.id);
+    if (error) { c.checked = !c.checked; erreur(error); } else { c.closest(".act").querySelector("small").textContent = c.checked ? "🚫 Masqué" : "Visible"; toast(c.checked ? "🚫 Produit masqué du site" : "Produit de nouveau visible"); }
+  }; });
+}
+$("f-vend").onchange = renderVend;
 
 /* ---------------- Assistant & infos ---------------- */
 async function loadIA(){
